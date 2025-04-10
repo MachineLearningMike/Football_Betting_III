@@ -14,8 +14,8 @@ from scipy.sparse.csgraph import connected_components
 
 import matplotlib.pyplot as plt
 from config import config
-from dictionary_driver import Excel_Driver
-from dictionary_manager import Dictionary
+from dictionary_driver import Dictionary_Driver
+from dictionary_manager import Dictionary_Manager
 # import excel_driver
 
 class NumpyEncoder(json.JSONEncoder):
@@ -361,7 +361,7 @@ def Find_Formal_Name( string, variations ) :
         return string
 
 def load_dictionaries():
-        dictionary = Dictionary('')
+        dictionary = Dictionary_Manager('')
         dictionaries = dictionary.Load_Dictionaries( filename = None, dict_names = ['leagues', 'teams', 'countries'] )
         name_variations = dictionary.Load_Dictionaries( filename = "Manually_Built Dictionary.xlsx", dict_names = ['team_name_variations'], list_mode = True )
         name_variations_total = {}
@@ -371,7 +371,7 @@ def load_dictionaries():
         return dictionaries
 
 def save_dictionaries(dictionaries_org):
-        dictionary = Dictionary('')
+        dictionary = Dictionary_Manager('')
 
         dictionaries = dictionaries_org.copy()
         name_variations = dictionaries.get('name_variations', None)

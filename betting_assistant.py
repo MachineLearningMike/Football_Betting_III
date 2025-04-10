@@ -14,8 +14,8 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 from config import config
-from dictionary_driver import Excel_Driver
-from dictionary_manager import Dictionary
+from dictionary_driver import Dictionary_Driver
+from dictionary_manager import Dictionary_Manager
 # import excel_driver
 
 #============================================================================ basic ===============================================================

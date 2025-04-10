@@ -14,9 +14,8 @@ from scipy.sparse.csgraph import connected_components
 
 import matplotlib.pyplot as plt
 from config import config
-from dictionary_driver import Excel_Driver
-from dictionary_manager import Dictionary
-# import excel_driver
+from dictionary_driver import Dictionary_Driver
+from dictionary_manager import Dictionary_Manager
 
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
@@ -72,7 +71,7 @@ def LoadBinaryData(path):
 
         return data
 
-def SaveDataFrame_Excel(df, filePath):
+def SaveDataFrame_Excel(df, filePath, sheet_name='Sheet1'):
         try:
                 with pd.ExcelWriter(filePath) as writer:
                         df.to_excel(writer)
@@ -361,7 +360,7 @@ def Find_Formal_Name( string, variations ) :
         return string
 
 def load_dictionaries():
-        dictionary = Dictionary('')
+        dictionary = Dictionary_Manager('')
         dictionaries = dictionary.Load_Dictionaries( filename = None, dict_names = ['leagues', 'teams', 'countries'] )
         name_variations = dictionary.Load_Dictionaries( filename = "Manually_Built Dictionary.xlsx", dict_names = ['team_name_variations'], list_mode = True )
         name_variations_total = {}
@@ -371,7 +370,7 @@ def load_dictionaries():
         return dictionaries
 
 def save_dictionaries(dictionaries_org):
-        dictionary = Dictionary('')
+        dictionary = Dictionary_Manager('')
 
         dictionaries = dictionaries_org.copy()
         name_variations = dictionaries.get('name_variations', None)
@@ -1846,7 +1845,7 @@ def getGameSequence(gameGraph, baseEdge, baseId, baseDate, targetLength, minCurr
 
                         #======== Find <which games on which pair> are in 'currents'
                         pairsToKeep = list(set([(teamA, teamB) for (_,_,_,_, teamA, teamB) in currents]))
-                        gamesByPair = [ ( (teamA, teamB), [(id, date, cond) for (_, id, date, con, _teamA, _teamB) in currents 
+                        gamesByPair = [ ( (teamA, teamB), [(id, date, con) for (_, id, date, con, _teamA, _teamB) in currents 
                                 if _teamA == teamA and _teamB == teamB ] )      # currents and pairs_from_current share the same expressions of pair.
                                 for (teamA, teamB) in pairsToKeep]       # May not: teamA < teamB
 

@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 from config import config
 from dictionary_driver import Dictionary_Driver
 from dictionary_manager import Dictionary_Manager
-# import excel_driver
 
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
@@ -72,7 +71,7 @@ def LoadBinaryData(path):
 
         return data
 
-def SaveDataFrame_Excel(df, filePath):
+def SaveDataFrame_Excel(df, filePath, sheet_name='Sheet1'):
         try:
                 with pd.ExcelWriter(filePath) as writer:
                         df.to_excel(writer)
@@ -83,13 +82,13 @@ def SaveDataFrame_Excel(df, filePath):
 def DeleteFile( path ):
         os.remove( path )
 
-def read_excel(filename):
+def read_excel(filename, sheet_name=0):
         # print(filename)
         # excelPath = os.path.join(countryFolder, filename + '.xlsx')
 
         # converters takes effect only after the excel file is read and, 
         # so, only after date-like string is converted to date type.
-        df = pd.read_excel(filename, parse_dates=False) #, converters={'Date':str})
+        df = pd.read_excel(filename, sheet_name=sheet_name, parse_dates=False) #, converters={'Date':str})
         return df
 
 def read_csv(filename):
@@ -1107,24 +1106,24 @@ def assign_seasonal_filenames(countryFolder):
     print('total rows in renamed files: ', total_rows)
     return
 
-def get_grown_and_new_from_football_data_v2(countryFolder, countryThemeFolder, Non_Odds_cols, num_bookies=5, oddsGroupsToExclude = [], preferedOrder = [], train_mode=True, skip=False):
-        binPath_grown = os.path.join(countryThemeFolder, "df_grown" + '.bin')
-        excelPath_grown = os.path.join(countryThemeFolder, "df_grown" + '.xlsx')
+def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeFolder, Non_Odds_cols, num_bookies=5, oddsGroupsToExclude = [], preferedOrder = [], train_mode=True, skip=False):
+        binPath_train = os.path.join(countryThemeFolder, "df_train" + '.bin')
+        excelPath_train = os.path.join(countryThemeFolder, "df_train" + '.xlsx')
         binPath_new = os.path.join(countryThemeFolder, "df_new" + '.bin')
         excelPath_new = os.path.join(countryThemeFolder, "df_new" + '.xlsx')
         binPath_white = os.path.join(countryThemeFolder, "df_white" + '.bin')
         excelPath_white = os.path.join(countryThemeFolder, "df_white" + '.xlsx')
-        dictPath = os.path.join(countryThemeFolder, "df_grown" + '.json')
+        dictPath = os.path.join(countryThemeFolder, "df_train" + '.json')
 
-        if not train_mode or skip:      # Try to use the existing ones if in inference mode or requested to skip.
-                df_grown = LoadBinaryData(binPath_grown)
+        if skip:      # Try to use the existing ones if in inference mode or requested to skip.
+                df_train = LoadBinaryData(binPath_train)
                 df_new = LoadBinaryData(binPath_new)
-                if df_grown is not None and df_new is not None:
-                        return df_grown, df_new
+                if df_train is not None and df_new is not None:
+                        return df_train, df_new
 
         #-------------- collect all .xlsx files in the target foloder.
         csvFiles = []
-        for (dirpath, dirnames, files) in os.walk(countryFolder):     # Make sure the .csv files are renamed .xlsx.
+        for (dirpath, dirnames, files) in os.walk(gameHistoryFolderPath):     # Make sure the .csv files are renamed .xlsx.
                 for filename in files:
                         # foloders (dirpath) that ends with '_' are skipped.
                         if not dirpath.endswith('_') and '.xlsx' in filename and '~' not in filename and 'df_' not in filename:
@@ -1255,6 +1254,8 @@ def get_grown_and_new_from_football_data_v2(countryFolder, countryThemeFolder, N
         # Let this be the only place where df is sorted.
         # df_built = df_built.sort_values(['Date', 'Div', 'HomeTeam', 'AwayTeam'], ascending=[True, True, True, True])   # This is required for consistency between calls.
         df_built = df_built.sort_values(['Date', 'Div'], ascending=[True, True])   # This is required for consistency between calls.
+        
+        #=======================================================================================================
         # No rows were dropped upto this point. Now permanent unique 'id's are assigned to the row.
         # A row's id assigned here will not change lifetime, UNLESS the same row was already assigned earlier.
         # 'id's will be used in place of ('Date', 'HomeTeam', 'AwayTeam'), for shorter storage space.
@@ -1265,50 +1266,49 @@ def get_grown_and_new_from_football_data_v2(countryFolder, countryThemeFolder, N
         df_built = improve_uk_dataframe(df_built, dropNa=False)
         print('df_built cols: ', df_built.columns)
 
-        df_grown_old = None
-        df_grown_old = LoadBinaryData(binPath_grown)
+        df_train_old = None
+        df_train_old = LoadBinaryData(binPath_train)
 
-        df_grown = df_new = None
-        if df_grown_old is not None:
-                pass # Make sure the rename_dictionaries are consistent.
-                successful, df_grown, df_new = find_and_grow_with_extra_game_records_pythonic(df_grown_old, df_built)
+        df_train = df_new = None
+
+        if df_train_old is not None:
+                successful, df_train, df_new = find_and_grow_with_extra_game_records_pythonic(df_train_old, df_built)
+
                 if successful:
-                        print('grown, new: ', df_grown.shape, df_new.shape)
+                        print('train, new: ', df_train.shape, df_new.shape)
                         print("Successfully found new game records and grew with them", "New rows: ", df_new.shape[0])
 
-        if df_grown_old is not None:
-                if successful:
                         if train_mode:
-                                # df_grown is the total and saved, df_new is the tail part of df_total and saved into the new file.
-                                SaveBinaryData(df_grown, binPath_grown)
-                                SaveDataFrame_Excel(df_grown, excelPath_grown)
+                                # df_train is the total and saved, df_new is the tail part of df_total and saved into the new file.
+                                SaveBinaryData(df_train, binPath_train)
+                                SaveDataFrame_Excel(df_train, excelPath_train)
                                 SaveBinaryData(df_new, binPath_new)
                                 SaveDataFrame_Excel(df_new, excelPath_new)
                                 SaveJsonData(filename_dict, dictPath)
                         else:
-                                # df_grown is the total and NOT saved, df_new is the tail part of df_total but saved into the WHITE file.
-                                df_grown = df_grown_old         # 
+                                # df_train is the total and NOT saved, df_new is the tail part of df_total but saved into the WHITE file.
+                                df_train = df_train_old         # 
                                 SaveBinaryData(df_new, binPath_white)
                                 SaveDataFrame_Excel(df_new, excelPath_white)  
                              
                 else:
                         raise("!!! Failed to find and grow with extra game records")
-        elif df_grown_old is None:      # successful is None
+        elif df_train_old is None:      # successful is None
                 if train_mode:
-                        # df_grown is the total and saved, df_new is empty and saved into the new file.
-                        df_grown = df_built
-                        SaveBinaryData(df_grown, binPath_grown)         # df_built
-                        SaveDataFrame_Excel(df_grown, excelPath_grown)  # df_built
+                        # df_train is the total and saved, df_new is empty and saved into the new file.
+                        df_train = df_built
+                        SaveBinaryData(df_train, binPath_train)         # df_built
+                        SaveDataFrame_Excel(df_train, excelPath_train)  # df_built
                         SaveJsonData(filename_dict, dictPath)
                         # create an empty df_new
                         print("creating an empty df_new...")
-                        df_new = df_grown.iloc[:0,:].copy()
+                        df_new = df_train.iloc[:0,:].copy()
                         SaveBinaryData(df_new, binPath_new)
                         SaveDataFrame_Excel(df_new, excelPath_new)
                 else:
-                        raise("!!! Inference mode requires df_grown to exist.")
+                        raise("!!! Inference mode requires df_train to exist.")
                 
-        return df_grown, df_new
+        return df_train, df_new
 
 
 
@@ -1368,31 +1368,34 @@ def find_and_grow_with_extra_game_records(df, df_new):
 def find_and_grow_with_extra_game_records_pythonic(df, df_new):
     successful = True; df_grown = None; df_extra = None
 
+    #====================================================================================
+    # Totally, we must keep the id values of df rows preserved in the resulting df_grown
+    #------------------------------------------------------------------------------------
+
     try:
         org_ids = list(df['id'])
         df = df.drop(['id'], axis=1)
         df_new = df_new.drop(['id'], axis=1)
 
-        # Check if there are duplicate rows. 
+        # Check if there are duplicate rows. -----------------------------------------
         # Do not drop but just check duplicate, because the org_id is there.
-        assert (df.duplicated() == False).all()
-        assert (df_new.duplicated() == False).all()
+        assert (df.duplicated(subset=['Date', 'HomeTeam', 'AwayTeam']) == False).all()
+        assert (df_new.duplicated(subset=['Date', 'HomeTeam', 'AwayTeam']) == False).all()
 
-        # print('df', df)
-        # print('df_new', df_new)
-
-        # Check if df is a subset of df_new. 
-        # In df_grown, all df rows will be placed before all df_new rows,
+        # Check if df is a subset of df_new. -----------------------------------------
+        # In the resulting df_grown, all df rows will be placed before all df_new rows,
         # because a duplicates fall into the range of df_new.
         # We intentionally keep df to remain in df_grown, 
-        # because we want to keep datasets expensively generated from df.
-        df_grown = pd.concat([df, df_new]).drop_duplicates()
+        # because we want to keep datasets that were expensively generated from df
+        # , although df is older than df_new.
+        # It's demonstrated that if two rows are duplicates, the 1st row survives by drop_duplicates.
+        # It's also demonstrated that if we concatenate two dataframes [df1, df2], df1's rows come first ...
+        # WIERD, if we omit the column names here, there are no duplicate rows. Do they change data over time?
+        df_grown = pd.concat([df, df_new]).drop_duplicates(subset=['Date', 'HomeTeam', 'AwayTeam'])
         assert len(df_grown) == len(df_new)
-        # print('df_grown', df_grown)
 
         # Find extra rows. We know all extra rows are placed after all df rows.
         df_extra = df_grown.iloc[df.shape[0]:]
-        # print('df_extra', df_extra)
 
         # Restore df ids for the df part and assign new ids to the df_extra part.
         ids = org_ids + list(range(max(list(org_ids))+1, max(list(org_ids))+1+df_extra.shape[0]))
@@ -1439,7 +1442,8 @@ def assign_seasonal_filenames(countryFolder):
 def improve_uk_dataframe(df, dropNa=True):
         # print("checking in improve_uk_dataframe: rows ", df.shape[0])
         if dropNa:
-                df.dropna(subset=df.columns, inplace=True)      # This is the ONLY line where we lose some or many rows.
+                #====================== Let this be the ONLY line where we lose some or many rows.============================
+                df.dropna(subset=df.columns, inplace=True)
         else:   # fill in missing odds
                 ogs = find_1X2_odds_group(df.columns)
                 og_cols = []
@@ -1469,7 +1473,8 @@ def improve_uk_dataframe(df, dropNa=True):
                                 # col = og+'A'
                                 # if pd.isnull(row[col]): (mean, std, max) = norm_params[col]; df.loc[index, col] = normal_a * std + mean
 
-                df.dropna(subset=df.columns, inplace=True)      # This is the ONLY line where we lose some or many rows.                
+                #====================== Let this be the ONLY line where we lose some or many rows.============================
+                df.dropna(subset=df.columns, inplace=True)
 
         df['Date'] = standardize_dates_uk(list(df['Date']))
         # Didn't convert to a uniform case, because football-data.uk team names have no case errors,
@@ -1840,7 +1845,7 @@ def getGameSequence(gameGraph, baseEdge, baseId, baseDate, targetLength, minCurr
 
                         #======== Find <which games on which pair> are in 'currents'
                         pairsToKeep = list(set([(teamA, teamB) for (_,_,_,_, teamA, teamB) in currents]))
-                        gamesByPair = [ ( (teamA, teamB), [(id, date, cond) for (_, id, date, con, _teamA, _teamB) in currents 
+                        gamesByPair = [ ( (teamA, teamB), [(id, date, con) for (_, id, date, con, _teamA, _teamB) in currents 
                                 if _teamA == teamA and _teamB == teamB ] )      # currents and pairs_from_current share the same expressions of pair.
                                 for (teamA, teamB) in pairsToKeep]       # May not: teamA < teamB
 
@@ -2137,7 +2142,7 @@ def fixture_id_to_ids_uk_maxflow(countryDirPath, id_to_ids_filename, targetLengt
 
         return total_id_to_ids
 
-def fixture_id_to_ids_uk_v3(folder, id_to_ids_filename, targetLength, df_total, year_span, testcount=-1):
+def create_map_v1(folder, idMap_filename, targetLength, df_sequence, df_base, year_span, testcount=-1, to_save=True):
 
         def find_Electric_Flow_On_Connected_Graph(graph, source, target, inpuCurrent):
                 '''
@@ -2367,20 +2372,23 @@ def fixture_id_to_ids_uk_v3(folder, id_to_ids_filename, targetLength, df_total, 
                 id_to_ids = {int(baseId): (report, games) for (baseId, report, games) in dates_ids}
                 return id_to_ids
         
-        def save_step_id_to_ids(path, step_id_to_ids, work_id_to_ids, old_step):
+        def save_step_id_to_ids(path, step_id_to_ids, work_id_to_ids, old_step, to_save):
                 save = {}
                 if old_step >= 0:
                         if len(work_id_to_ids) > 0:   # Don't save anew unless we have extra id_to_ids, because this saving sometimes saves a wrong file.'"Electrical Flows 2.pdf"
                                 save = step_id_to_ids | sort_id_to_ids(work_id_to_ids)
-                                SaveJsonData(save, path)
+                                if to_save: SaveJsonData(save, path)
                         else:
                                 save = step_id_to_ids
                 return save
 
         #=========================================================================== Main =======================================================================
 
-        id_list = list(df_total['id']); div_list = list(df_total['Div']); home_list = list(df_total['HomeTeam']); away_list = list(df_total['AwayTeam']); date_list = list(df_total['Date'])
+        id_list = list(df_sequence['id']); div_list = list(df_sequence['Div']); home_list = list(df_sequence['HomeTeam']); away_list = list(df_sequence['AwayTeam']); date_list = list(df_sequence['Date'])
         total_list = list(zip(id_list, div_list, home_list, away_list, date_list))
+
+        id_list_s = list(df_base['id']); div_list_s = list(df_base['Div']); home_list_s = list(df_base['HomeTeam']); away_list_s = list(df_base['AwayTeam']); date_list_s = list(df_base['Date'])
+        search_list = list(zip(id_list_s, div_list_s, home_list_s, away_list_s, date_list_s))
 
         step_size = int(1E3)        # do not change.
         old_step = -1
@@ -2391,18 +2399,18 @@ def fixture_id_to_ids_uk_v3(folder, id_to_ids_filename, targetLength, df_total, 
         # df_built = df_built.sort_values(['Date', 'Div'], ascending=[True, True])
         
         max_days_covered = 0; count = 0
-        for (base_id, div, home, away, base_date) in total_list:      # date: yyyy-mm-dd        , in search_list
+        for (base_id, div, home, away, base_date) in search_list:      # date: yyyy-mm-dd        , in search_list
                 if count == testcount: break
                 count += 1
 
                 step = int(base_id/step_size) * step_size   # sure step >= 0
 
                 def build_path(step):
-                        return os.path.join(folder, id_to_ids_filename + '-step-' + str(step) + '-size-' + str(step_size) + '.json')
+                        return os.path.join(folder, idMap_filename + '-step-' + str(step) + '-size-' + str(step_size) + '.json')
 
                 # Note the final step is always not saved. Save it after this loop.
                 if step != old_step:    # We are turning to a new step.
-                        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step)
+                        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step, to_save)
                         total_id_to_ids = total_id_to_ids | save
                         step_id_to_ids = {}
                         path = build_path(step)
@@ -2432,8 +2440,103 @@ def fixture_id_to_ids_uk_v3(folder, id_to_ids_filename, targetLength, df_total, 
                 if len(games) >= 0: work_id_to_ids[base_id] = (report, games)
 
         # Give a chance to the final step to save.
-        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step)
+        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step, to_save)
         total_id_to_ids = total_id_to_ids | save
+
+        # print(len(total_id_to_ids))
+        total_id_to_ids = { id : value for (id, value) in total_id_to_ids.items() if int(id) in id_list_s }
 
         return total_id_to_ids
 
+def remove_folder_contents(folderPath):
+    for (root, dirs, files) in os.walk(folderPath):
+        if root == folderPath:
+            for file in files:
+                filePath = os.path.join(folderPath, file)
+                os.remove(filePath)
+            for dir in dirs:
+                dirPath = os.path.join(folderPath, dir)
+                shutil.rmtree(dirPath)
+
+def copy_id_map(sourcePath, destPath, destNote):
+    files = []
+    for (root, dirs, files) in os.walk(sourcePath):     # Make sure the .csv files are renamed .xlsx.
+        for file in files:
+            splits = file.split('-'); splits[2] = destNote
+            newFileName = "-".join(splits)
+            print(newFileName)
+            filePath = os.path.join(sourcePath, file)
+            newfilePath = os.path.join(destPath, newFileName)
+            shutil.copy(filePath, newfilePath)
+    return
+
+def copy_dataset(sourcePath, destPath, destNote):
+    files = []
+    # print(sourcePath, destPath, destNote)
+    for (root, dirs, files) in os.walk(sourcePath):
+        if root == sourcePath:
+            for file in files:
+                splits = file.split('-'); splits[2] = destNote
+                newFileName = "-".join(splits)
+                filePath = os.path.join(sourcePath, file)
+                newfilePath = os.path.join(destPath, newFileName)
+                shutil.copy(filePath, newfilePath)
+            for dir in dirs:
+                splits = dir.split('-'); splits[2] = destNote
+                newFileName = "-".join(splits)
+                filePath = os.path.join(sourcePath, dir)
+                newfilePath = os.path.join(destPath, newFileName)
+                shutil.copytree(filePath, newfilePath)
+
+from tokenizers import (decoders, models, normalizers, pre_tokenizers, processors, trainers, Tokenizer)
+
+def createSimpleTokenizer(corpus_files, vocab_size, unknown_token, special_tokens):
+        tokenizer = Tokenizer(models.WordLevel(unk_token=unknown_token))
+        tokenizer.normalizer = normalizers.Sequence([normalizers.NFD(), normalizers.Lowercase(), normalizers.StripAccents()])
+        tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+        trainer = trainers.WordLevelTrainer(vocab_size=vocab_size, special_tokens=special_tokens)
+        tokenizer.train(corpus_files, trainer=trainer)
+        tokenizer.decoder = decoders.WordPiece(prefix=" ")
+        return tokenizer
+
+def creat_team_tokenizer_uk(master_df, tokenizer_folder_path):
+    teams = list(set(list(master_df['HomeTeam']) + list(master_df['AwayTeam'])))
+    teams_string = [str(team) for team in teams]
+    teams_string = [re.sub(r"\s", "_", item) for item in teams_string]    # replace spaces with a '_'
+    teams_text = " ".join(teams_string)
+
+    corpus_file = os.path.join(tokenizer_folder_path, 'team_ids_text_uk.txt')
+    f = open(corpus_file, "w+", encoding="utf-8")
+    f.write(teams_text)
+    f.close()
+
+    corpus_files = [corpus_file]
+    unknown_token = config['unknown_token']
+    special_tokens = [unknown_token] ################### + ["[HOME]", "[AWAY]"]
+    vocab_size = len(teams_string) + len(special_tokens)
+
+    tokenizer_team = createSimpleTokenizer(corpus_files, vocab_size, unknown_token, special_tokens)
+    return tokenizer_team
+
+def convert_to_token(tokenizer, teamList):
+    success = True
+    teams = [team.strip() for team in [re.sub(r"\s", "_", item) for item in teamList]]
+    teams = " ".join(teams)
+    teams = tokenizer.encode(teams).tokens
+    for id in range(len(teamList)):
+        if teams[id] == config['unknown_token']:
+            print("'", teamList[id], "' is unknown, and replaced with ", config['unknown_token'])
+            success = False
+    return teams, success
+
+import difflib
+def find_most_similar_teams(team_vocab, input, count):
+    mr = difflib.SequenceMatcher()
+    similarities = []
+    for team in team_vocab:
+        mr.set_seqs(team, input) 
+        similarities.append((mr.ratio(), team))
+    similarities.sort(reverse=True)
+    similarities = similarities[:count]
+    similarities = [team for (_, team) in similarities]
+    return similarities
