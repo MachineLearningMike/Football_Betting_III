@@ -14,8 +14,8 @@ from scipy.sparse.csgraph import connected_components
 
 import matplotlib.pyplot as plt
 from config import config
-from excel_driver import Excel_Driver
-from dictionary import Dictionary
+from dictionary_driver import Excel_Driver
+from dictionary_manager import Dictionary
 # import excel_driver
 
 class NumpyEncoder(json.JSONEncoder):
@@ -83,13 +83,13 @@ def SaveDataFrame_Excel(df, filePath):
 def DeleteFile( path ):
         os.remove( path )
 
-def read_excel(filename):
+def read_excel(filename, sheet_name=0):
         # print(filename)
         # excelPath = os.path.join(countryFolder, filename + '.xlsx')
 
         # converters takes effect only after the excel file is read and, 
         # so, only after date-like string is converted to date type.
-        df = pd.read_excel(filename, parse_dates=False) #, converters={'Date':str})
+        df = pd.read_excel(filename, sheet_name=sheet_name, parse_dates=False) #, converters={'Date':str})
         return df
 
 def read_csv(filename):
