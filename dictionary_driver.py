@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 import os
 import shutil
 
-class Excel_Driver() :
+class Dictionary_Driver() :
 
     def __init__( self ) :
         pass
@@ -35,7 +35,6 @@ class Excel_Driver() :
 
 
     def Ensure_File_Sheet_Exists( self, filePath, sheetName = None ) :
-
         try :
             # Make sure file exists.
             if os.path.exists( filePath ) is True :
@@ -180,7 +179,6 @@ class Excel_Driver() :
     #======================== Read ========================
 
     def Load_Data_Dict( self, filePath, sheetName, horizontal = True, reduce = 'last', list_mode = False ) :
-
         workbook = None
         if os.path.exists( filePath ) is True :
             workbook = openpyxl.load_workbook( filePath )
@@ -211,7 +209,6 @@ class Excel_Driver() :
 
 
     def Read_Dict_Horizontal( self, sheet, reduce = 'last' ) :
-
         cells_head_row = sheet[1]
         target_row = sheet.max_row
 
@@ -225,9 +222,9 @@ class Excel_Driver() :
                     dictionary[ str( cell.value ) ] = value
                     count += 1
 
-        print( "============= Total {} columns written to Excel file.".format( count ) )
+        print( "============= Total {} columns read from Excel file.".format( count ) )
 
-        return
+        return dictionary
 
 
     def Read_Dict_Vertical( self, sheet, reduce = 'last', list_mode = False ) :
