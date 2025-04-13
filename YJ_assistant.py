@@ -1499,7 +1499,8 @@ def standardize_date_uk(rugged_date):
         if isinstance(rugged_date, datetime.datetime):  # If Regional Format == English(United Kingdom), all calls fall to this branch.
                 date = rugged_date
         elif isinstance(rugged_date, str):
-                print("Unexpected string date !!!!!!")
+                raise("Unexpected string date !!!!!! Check 'regional format.")
+                
                 try:
                         date = datetime.datetime.strptime(rugged_date, '%d/%m/%Y')
                 except:
@@ -2641,7 +2642,7 @@ def CREATE_MAP_v2(folder, idMap_filename, targetLength, df_sequence, df_base, ye
                                 flows_copy = [abs(f) for f in flows_copy]
                                 flows_copy.sort(reverse=True)
 
-                                if  flows_copy[0] > inputCurrent/100:   # e-current tach seems successful.
+                                if  flows_copy[0] > inputCurrent/10000:   # e-current tach seems successful.
                                         # Now, either isConnected(dgg) or not. This call worsens it by removing some edges.
                                         dgg, _, _, _ = try_remove_lowest_flow_games(dgg, flows, edges, history_len)
                                         games = find_games(dgg)
@@ -2745,17 +2746,17 @@ def CREATE_MAP_v2(folder, idMap_filename, targetLength, df_sequence, df_base, ye
                 # div_sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in sub_list if div == base_div]
 
                 inputCurrent = 1000.0
-                games, report = get_historical_games_v2(base_id, base_date, base_div, home, away, sub_list, targetLength, inputCurrent, conductance365=0.9)
+                games, seq_type = get_historical_games_v2(base_id, base_date, base_div, home, away, sub_list, targetLength, inputCurrent, conductance365=0.9)
 
                 if len(games) > 0: days_covered = (base_date - date_list[id_list.index(games[-1])]).days
                 else: days_covered = 0
                 if max_days_covered < days_covered: max_days_covered = days_covered
 
-                print("base_id: {}, report: {}, days_span: {}, games[:10]: {}" \
-                      .format(base_id, report, days_covered, games[:10]), end='\r')
+                print("base_id: {}, seq_type: {}, days_span: {}, games[:10]: {}" \
+                      .format(base_id, seq_type, days_covered, games[:10]), end='\r')
                 #-------------------------------------------------------------------------------------------------------
 
-                if len(games) >= 0: work_id_to_ids[base_id] = (report, games)
+                if len(games) >= 0: work_id_to_ids[base_id] = (seq_type, games)
 
         # Give a chance to the final step to save.
         save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step, to_save)
