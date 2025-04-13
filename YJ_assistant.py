@@ -2460,6 +2460,314 @@ def CREATE_MAP_v1(folder, idMap_filename, targetLength, df_sequence, df_base, ye
 
         return total_id_to_ids
 
+
+def CREATE_MAP_v2(folder, idMap_filename, targetLength, df_sequence, df_base, year_span, testcount=-1, to_save=True):
+
+        def find_Electric_Flow_On_Connected_Graph(graph, source, target, inpuCurrent):
+                '''
+                Find the flow of electric current on each edge of 'graph' when total flow of 1.0 flows from 'source' to 'target' nodes,
+                with conductance of edges stored in edge['conductance'].
+                1. If 'source' and 'target' nodes are disconnected with each other, WEIRD amounts on flows on edges.
+                2. If 'source' and 'target' nodes have zero conductance between them, it produces WEIRD amount of flows that violate Kirchhoff's law.
+                '''
+                edges = [e for e in graph.edges]        # (u, v) either u < v or u < v.
+                nodes = [v for v in graph.nodes]
+                edges_signs = []
+                for v in nodes:
+                        # We want the orientation of an edge (u, v) to be from min(u, v) to max(u, v)
+                        edges_v = [(v, u) for u in nodes if (v, u) in graph.edges]      # all edges that have v as its node, in the form of (v,u)
+                        edges_v_plus = [(v, u) for (v, u) in edges_v if v > u]          # (v, u < v)
+                        edges_v_minus = [(v, u) for (v, u) in edges_v if v < u]         # (v, u >= v)
+                        edges_v_plus = [(edges.index((u, v)) if edges.count((u, v)) > 0 else edges.index((v, u))) for (u, v) in edges_v_plus]
+                        edges_v_minus = [(edges.index((u, v)) if edges.count((u, v)) > 0 else edges.index((v, u))) for (u, v) in edges_v_minus]
+                        edges_signs.append((edges_v_plus, edges_v_minus))
+                matrix_B = [ [ (1 if e in edges_signs[v][1] else -1 if e in edges_signs[v][0] else 0) for e in range(len(edges)) ] for v in range(len(nodes))]
+                matrix_B = np.array(matrix_B, dtype=np.float32)
+                vector_C = np.array( [graph.edges[e]['conductance'] for e in edges], dtype=np.float32)
+                matrix_C = np.diag(vector_C)
+                matrix_L = np.dot(np.dot(matrix_B, matrix_C), matrix_B.T)
+                inverse_L = np.linalg.pinv(matrix_L, hermitian=True)    # Moore-Penrose pseudo-inverse
+                source_node = nodes.index(source)
+                target_node = nodes.index(target)
+                X_vector = np.zeros((len(nodes),), dtype=np.float32)
+                X_vector[source_node] = inpuCurrent
+                X_vector[target_node] = - inpuCurrent
+                flows = np.matmul(matrix_C, matrix_B.T)
+                flows = np.matmul(flows, inverse_L)
+                flows = np.matmul(flows, X_vector)
+
+                return flows, nodes, edges   # nodes and edges, just in case list(graph.nodes) might have different order each time.
+
+        def find_nTotalGames(gameGraph):
+                nTotalGames = 0
+                for e in gameGraph.edges:   nTotalGames += len(gameGraph.edges[e]['games'])
+                return nTotalGames
+
+        def reachable(graph, u, v):
+                _reachable = True
+                try:    nx.shortest_path_length(graph, u, v)
+                except: _reachable = False
+                return _reachable
+
+        def isConnected(gameGraph):
+                connected = True
+                for u in gameGraph.nodes:
+                        for v in gameGraph.nodes:
+                                if not reachable(gameGraph, u, v):
+                                        connected = False
+                                        break
+                return connected
+
+        def create_conducting_game_graph_uk(game_list, baseDate, conductance365):
+                # game_list is sorted in (date, div).
+                graph = nx.Graph()
+                alpha = pow(conductance365, -1/365)
+                def conductance(_date):
+                        daysAgo = (baseDate - _date).days       # > 0
+                        return pow(alpha, -daysAgo)             # pow(conductance365, daysAgo/365) <= 1, as conductance365 < 1
+
+                for id, div, home, away, dt in game_list:
+                        if (home, away) not in graph.edges:
+                                graph.add_edge(home, away)
+                                graph.edges[home, away]['games'] = []
+                        graph.edges[home, away]['games'].append((id, dt, conductance(dt)))
+
+                for edge in graph.edges:
+                        games = graph.edges[edge]['games']
+                        edge_con = 0.0
+                        for (_, _, con) in games: edge_con += con
+                        graph.edges[edge]['conductance'] = edge_con
+
+                return graph
+
+
+        def find_games(gameGraph):
+                games = []
+                for e in gameGraph.edges:   games += [id for (id, date, con) in gameGraph.edges[e]['games']]
+                return games
+
+        def try_remove_lowest_flow_games(gameGraph, eFlows, edges, targetLength):
+                """
+                1. Eithe isConnected(gameGraph) or not. This call worsens connectivity by removing some edges.
+                2. Very small e-current incidently created by numerical errors unexpectedly affect this function.
+                """ 
+                emptyPairs = []
+                currents = []
+                for (teamA, teamB) in gameGraph.edges:  # May not: teamA < teamB. PairExpression_1 is created here.
+                        # get the current on the edge (teamA, teamB)
+                        eId = (edges.index((teamA, teamB)) if edges.count((teamA, teamB)) > 0 else edges.index((teamB, teamA))) # Exists.
+                        flow = abs(eFlows[eId]) # May be very small. NP.
+                        
+                        if len(gameGraph.edges[teamA, teamB]['games']) <= 0:
+                                emptyPairs.append((teamA, teamB))       # PairExpression_1
+                        else:   # Enlist all games no matter how small e-current flows on them.
+                                edge_conductance = gameGraph.edges[teamA, teamB]['conductance'] # Asserted positive, no need epsilon.
+                                currentPerUnitCon = flow / edge_conductance
+                                pair_games = gameGraph.edges[teamA, teamB]['games']     # Creates a set of pair expressions. Should be PairExpression_1, if deterministic.
+                                pair_current = [(currentPerUnitCon * cond, id, date, cond, teamA, teamB) for (id, date, cond) in pair_games] # PairExpression_1
+                                currents += pair_current
+
+                # Note: Pair representations (A, B) in currents came from [for (A, B) in gameGraph.edges]
+                for (teamA, teamB) in emptyPairs:   gameGraph.remove_edge(teamA, teamB)
+                assert find_nTotalGames(gameGraph) == len(currents)
+
+                # sort currents in (curr / descending, date / descending )
+                currents = [(date, curr, id, cond, teamA, teamB) for (curr, id, date, cond, teamA, teamB) in currents]
+                currents.sort(reverse=True)     # later dates come first
+                currents = [(curr, id, date, cond, teamA, teamB) for (date, curr, id, cond, teamA, teamB) in currents]
+                currents.sort(reverse=True)    # larger current comes first. PairExpression_1
+
+                if len(currents) <= targetLength:   pass        # This doens't happen becasue we enlisted ALL games above.
+                else:
+                        # Either zero-current edges survive or positive-current edges are removed by this cut, both leading to disconnected graph. 
+                        currents = currents[ : targetLength ]   # note currents are sorted in (curr, date)
+                        pairsChanged = []
+                        #-----------------------------------------------------------------------------------------------------
+                        #   Below, 'currents' is reflected to gameGraph. No more pairs/games are removed, except that.
+                        #-----------------------------------------------------------------------------------------------------
+
+                        #======== Find <which games on which pair> are in 'currents'
+                        pairsInCurrents = list(set([(teamA, teamB) for (_,_,_,_, teamA, teamB) in currents]))   # PairExpression_1
+                        gamesByPairInCurrents = [ ( (teamA, teamB), [(id, date, con) for (_, id, date, con, _teamA, _teamB) in currents # PairExpression_1
+                                if _teamA == teamA and _teamB == teamB ] )      # currents and pairs_from_current share the same expressions of pair.
+                                for (teamA, teamB) in pairsInCurrents]       # May not: teamA < teamB
+
+                        #========= Remove existing pairs that are not in pairsInCurrents, that has no game at all in currents.
+                        allPairs = [(teamA, teamB) for (teamA, teamB) in gameGraph.edges]   # PairExpression_2 is created here.
+                        pairsToRemove = [(teamA, teamB) for (teamA, teamB) in allPairs if ((teamA, teamB) not in pairsInCurrents and (teamB, teamA) not in pairsInCurrents)]
+                        for (teamA, teamB) in pairsToRemove:  gameGraph.remove_edge(teamA, teamB)
+
+                        #========= Replace existing games of pairsInCurrents with games found in 'currents' if appropriate.
+                        pairsChanged = []
+                        for ((teamA, teamB), games) in gamesByPairInCurrents: # PairExpression_1
+                                if len(gameGraph.edges[teamA, teamB]['games']) != len(games):   # if some games were excluded.
+                                        gameGraph.edges[teamA, teamB]['games'] = games  # Replace.
+                                        pairsChanged.append((teamA, teamB))
+
+                        #========= Update nTotalGames
+                        nTotalGames = find_nTotalGames(gameGraph)
+                        assert nTotalGames == targetLength      # because we enlisted all games.
+
+                return gameGraph, nTotalGames, pairsChanged, currents
+        
+        #-------------------------------------------------------------------------------------------------------------
+
+        div_list = list(df_sequence['Div']); home_list = list(df_sequence['HomeTeam']); away_list = list(df_sequence['AwayTeam'])
+        unique_divs = set(div_list)
+
+        teams_by_div = { div : set([team for team in home_list if div_list[home_list.index(team)]==div]).union(set([team for team in away_list if div_list[away_list.index(team)]==div])) for div in unique_divs }
+        for div1 in unique_divs:
+                for div2 in unique_divs:
+                        if div1 != div2:
+                                assert teams_by_div[div1].intersection(teams_by_div[div2]) == set()
+        teams_by_div = { div: list(teams) for (div, teams) in teams_by_div.items()}
+        #--------------------------------------------------------------------------------------------------------------
+
+
+        def get_historical_games_intra_div(base_id, base_date, base_div, home, away, div_sub_list, history_len, inputCurrent, conductance365):
+                """
+                Goal: Choose as many as, most relevant, games from div_sub_list
+                """
+                games = []; seq_type = 0
+                if len(div_sub_list) <= history_len:
+                        games = [id for (id, _, _, _, _) in div_sub_list]
+                        seq_type = 10
+                else:
+                        dgg = create_conducting_game_graph_uk(div_sub_list, base_date, conductance365=conductance365)   # MUCH faster than transform_to_conducting_graph
+
+                        if reachable(dgg, home, away):
+                                flows, nodes, edges = find_Electric_Flow_On_Connected_Graph(dgg, home, away, inputCurrent)
+                                flows_copy = copy.deepcopy(flows)
+                                flows_copy = [abs(f) for f in flows_copy]
+                                flows_copy.sort(reverse=True)
+
+                                if  flows_copy[0] > inputCurrent/100:   # e-current tach seems successful.
+                                        # Now, either isConnected(dgg) or not. This call worsens it by removing some edges.
+                                        dgg, _, _, _ = try_remove_lowest_flow_games(dgg, flows, edges, history_len)
+                                        games = find_games(dgg)
+                                        assert len(games) == history_len
+                                        seq_type = 20
+                                else:   # e-current tech failed.
+                                        games = [id for (id, _, _, _, _) in div_sub_list[- history_len : ]]  # collect latest ids
+                                        seq_type = 30
+
+                        else: # Very rare. Few games are new edge in the conductance graph after collecting at lease HISTORY_LEN past games in the graph. They might be inter-league games.
+                                # find_Electric_Flow_On_Connected_Graph(.) doesn't work here.
+                                games = [id for (id, _,_,_,_) in div_sub_list[- history_len : ]]   # collect latest ids
+                                seq_type = 40
+
+                return games, seq_type
+        
+             
+     
+        def get_historical_games_v2(base_id, base_date, base_div, home, away, sub_list, history_len, inputCurrent, conductance365):
+                games = []; report = None
+                if len(sub_list) <= history_len:
+                        games = [id for (id, _, _, _, _) in sub_list]      # better than dummy games.
+                        seq_type = 1
+                else:
+                        # This logic is based on the emperical proof that a team plays in only a division. Divisions, as a set of teams, have no intersection.
+
+                        div_sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in sub_list if div == base_div]
+                        games, seq_type = get_historical_games_intra_div(base_id, base_date, base_div, home, away, div_sub_list, history_len, inputCurrent, conductance365)
+
+                        if len(games) < history_len:
+                                candi_games = [id for (id, _, _, _, _) in sub_list if id not in games]  # We know sub_list is ascendigly sorted in date.
+                                games = games + candi_games[ - (history_len - len(games)) : ]         # So this chooses latest games.
+                                seq_type += 1
+                        assert len(games) == history_len
+                        # if not isConnected(gg): report += 1000         # expensive
+
+                games.sort(reverse=True)        # latest games come first.
+                return games, seq_type
+        
+        def sort_id_to_ids(id_to_ids):
+                dates_ids = [(baseId, report, games) for (baseId, (report, games)) in id_to_ids.items()]
+                dates_ids.sort()        # increasing on baseId
+                # print('dates_ids', dates_ids)
+                id_to_ids = {int(baseId): (report, games) for (baseId, report, games) in dates_ids}
+                return id_to_ids
+        
+        def save_step_id_to_ids(path, step_id_to_ids, work_id_to_ids, old_step, to_save):
+                save = {}
+                if old_step >= 0:
+                        if len(work_id_to_ids) > 0:   # Don't save anew unless we have extra id_to_ids, because this saving sometimes saves a wrong file.'"Electrical Flows 2.pdf"
+                                save = step_id_to_ids | sort_id_to_ids(work_id_to_ids)
+                                if to_save: SaveJsonData(save, path)
+                        else:
+                                save = step_id_to_ids
+                return save
+
+        #=========================================================================== Main =======================================================================
+
+        id_list = list(df_sequence['id']); div_list = list(df_sequence['Div']); home_list = list(df_sequence['HomeTeam']); away_list = list(df_sequence['AwayTeam']); date_list = list(df_sequence['Date'])
+        total_list = list(zip(id_list, div_list, home_list, away_list, date_list))
+
+        id_list_s = list(df_base['id']); div_list_s = list(df_base['Div']); home_list_s = list(df_base['HomeTeam']); away_list_s = list(df_base['AwayTeam']); date_list_s = list(df_base['Date'])
+        search_list = list(zip(id_list_s, div_list_s, home_list_s, away_list_s, date_list_s))
+
+        step_size = int(1E3)        # do not change.
+        old_step = -1
+        total_id_to_ids = {}
+        step_id_to_ids = {}
+        work_id_to_ids = {}
+
+        # df_built = df_built.sort_values(['Date', 'Div'], ascending=[True, True])
+        
+        max_days_covered = 0; count = 0
+        for (base_id, base_div, home, away, base_date) in search_list:      # date: yyyy-mm-dd        , in search_list
+                if count == testcount: break
+                count += 1
+
+                step = int(base_id/step_size) * step_size   # sure step >= 0
+
+                def build_path(step):
+                        return os.path.join(folder, idMap_filename + '-step-' + str(step) + '-size-' + str(step_size) + '.json')
+
+                # Note the final step is always not saved. Save it after this loop.
+                if step != old_step:    # We are turning to a new step.
+                        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step, to_save)
+                        total_id_to_ids = total_id_to_ids | save
+                        step_id_to_ids = {}
+                        path = build_path(step)
+                        id_to_ids_read = LoadJsonData(path)
+                        if id_to_ids_read is not None:
+                                step_id_to_ids = id_to_ids_read
+                        work_id_to_ids = {}
+                        old_step = step
+                
+                if str(base_id) in step_id_to_ids.keys():  continue
+
+                #------------------------------------------------------------------------------------------------------- Goal: get games.
+                #????????????????????????????????????? Shall we limit the list to max 5 years ?????????????????????????????????????????????????
+                day_span = year_span * 365
+                sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in total_list if id < base_id and (base_date-dt).days <= day_span]
+                # div_sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in sub_list if div == base_div]
+
+                inputCurrent = 1000.0
+                games, report = get_historical_games_v2(base_id, base_date, base_div, home, away, sub_list, targetLength, inputCurrent, conductance365=0.9)
+
+                if len(games) > 0: days_covered = (base_date - date_list[id_list.index(games[-1])]).days
+                else: days_covered = 0
+                if max_days_covered < days_covered: max_days_covered = days_covered
+
+                print("base_id: {}, report: {}, days_span: {}, games[:10]: {}" \
+                      .format(base_id, report, days_covered, games[:10]), end='\r')
+                #-------------------------------------------------------------------------------------------------------
+
+                if len(games) >= 0: work_id_to_ids[base_id] = (report, games)
+
+        # Give a chance to the final step to save.
+        save = save_step_id_to_ids(build_path(old_step), step_id_to_ids, work_id_to_ids, old_step, to_save)
+        total_id_to_ids = total_id_to_ids | save
+
+        # print(len(total_id_to_ids))
+        total_id_to_ids = { id : value for (id, value) in total_id_to_ids.items() if int(id) in id_list_s }
+
+        return total_id_to_ids
+
+
+
 def remove_folder_contents(folderPath):
     for (root, dirs, files) in os.walk(folderPath):
         if root == folderPath:
@@ -2636,45 +2944,37 @@ def check_for_consistency_input_excel_sheet(countryTheme_folder_path, file_folde
 
     check_report = ""
     consistent = True
-
-    #-------------------------- Check for missing columns ----------------------
+    # Check for consistency
     delta = list(set(input_columns) - set(df.columns))
     if len(delta) > 0: 
         consistent = False
         check_report += "Some columns are missing: {}\n".format(",".join(delta))
-    #-------------------------- Check for empty dataframe ----------------------
     if not (df.shape[0] > 0): 
         consistent = False
         check_report += "There are no data rows. \n"
-    #-------------------------- Check for NaN values ---------------------------
     if df.isnull().any().any():
         consistent = False
         check_report += "There are some NaN values. \n"
 
-    #-------------------------- Check dates -------------------------------------
     if set(['year', 'month', 'day', 'hour', 'minute']) <= set(df.columns):
         try:
             datetime_series = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']], utc=True)
             now = datetime.datetime.now(pytz.utc)
             delta_hours = [(dt - now).total_seconds()/3600 for dt in datetime_series]
             negatives = [id for id in range(len(delta_hours)) if delta_hours[id] < 0]
-            #------------------------- Check for past dates ----------------------
             if len(negatives) > 0:
                 consistent = False
                 check_report += "Some datetimes are past: rows = {}\n".format(",".join([str(id) for id in negatives]))
-            #------------------------- Check for ahead dates ----------------------
             aheads = [id for id in range(len(delta_hours)) if delta_hours[id] > 24]
             if max(delta_hours) > 24:
                 consistent = False
                 check_report += "Some datetimes are not within 24 hours: rows = {}\n".format(",".join([str(id) for id in aheads]))
         except:
-            #------------------------- Check for mal-formed date fields ------------
             consistent = False
             check_report += "Some datetime columns have invalid data types or value range. \n"
 
     divs = list(df['Div']); homes = list(df['HomeTeam']); aways = list(df['AwayTeam'])
     for id in range(len(divs)):
-           #-------------------------- Check for correct Divisions ------------------
            if homes[id] not in teams_by_div[divs[id]]:
                   consistent = False
                   check_report += "{} doesn't belong to {} teams\n".format(homes[id], divs[id])
@@ -2682,7 +2982,6 @@ def check_for_consistency_input_excel_sheet(countryTheme_folder_path, file_folde
                   consistent = False
                   check_report += "{} doesn't belong to {} teams\n".format(aways[id], divs[id])
 
-    #--------------------------------- Check for misspelling of teams ------------------
     lists = [homes, aways]
     teamList = [val for tup in zip(*lists) for val in tup]
     teams, candidates, success = convert_to_token_with_candidates(tokenizer, teamList, candi_count=3)
@@ -2692,7 +2991,6 @@ def check_for_consistency_input_excel_sheet(countryTheme_folder_path, file_folde
         for (spell, candis) in candidates.items():
             check_report += "\t{} : {}\n".format(spell, candis)
 
-    #--------------------------------- Check for Division names -------------------------
     delta = list(set(df['Div']) - set(divs))
     if len(delta) > 0:
         consistent = False
@@ -2702,7 +3000,6 @@ def check_for_consistency_input_excel_sheet(countryTheme_folder_path, file_folde
     for bookie in bookie_list:
         odds_cols += [bookie+'H', bookie+'D', bookie+'A']
 
-    #----------------------------------- Check for abnormal individual odds -------------------------
     for col in odds_cols:
         odds = np.array(df[col])
         condition = odds <= 1.0
@@ -2714,7 +3011,6 @@ def check_for_consistency_input_excel_sheet(countryTheme_folder_path, file_folde
             consistent = False
             check_report += "Some odds are too large: rows {} columns {}\n".format(list(np.where(condition)[0]), col)
 
-    #------------------------------------ Check for abnormal odds groups ------------------------------
     for bookie in bookie_list:
         cols = [bookie+'H', bookie+'D', bookie+'A']
         odds = np.array(df[cols])
