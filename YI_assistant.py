@@ -8,6 +8,8 @@ import json
 import re
 import copy
 import shutil
+import openpyxl
+import pytz
 
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
@@ -900,9 +902,9 @@ def get_grown_and_new_from_football_data(countryFolder, Non_Odds_cols, num_booki
                         if not dirpath.endswith('_') and '.xlsx' in filename and '~' not in filename and 'df_' not in filename:
                                 print(filename, end=' ')
                                 csvFiles.append((dirpath, filename))
-        print()
+
         csvFiles.sort()
-        print(len(csvFiles), ' files found') 
+        print(len(csvFiles), ' csv files found') 
 
         #-------------- find odds groups that have 1X2 odds
         def find_1X2_odds_group(columns):
@@ -954,7 +956,6 @@ def get_grown_and_new_from_football_data(countryFolder, Non_Odds_cols, num_booki
                 print("!!!!!! Too many bookies requested.")
         total_ogs_ordered = [og for (_, og) in counts][: min(num_bookies, len(counts))]     #-------- limited to the first num_bookies bookies.
         total_ogs_ordered = [og for og in total_ogs_ordered if og not in oddsGroupsToExclude]   # ---- this may reduce the list.
-        print('oGroups count-ordered ', total_ogs_ordered)
 
         def get_1X2_rename_dict(local_ogs):
                 local_ogs_ordered = [og for og in total_ogs_ordered if og in local_ogs]
@@ -1004,7 +1005,6 @@ def get_grown_and_new_from_football_data(countryFolder, Non_Odds_cols, num_booki
                                 if key == new_name:
                                         renameVector.append(org_name)
                                         break
-                print('Rename Vector: ', key, renameVector)
         
         # df_built.drop_duplicates()
         # Let this be the only place where df is sorted.
@@ -1017,7 +1017,6 @@ def get_grown_and_new_from_football_data(countryFolder, Non_Odds_cols, num_booki
         df_built.insert(loc=0, column='id', value=ids)
 
         df_built = improve_uk_dataframe(df_built)
-        print('df_built cols: ', df_built.columns)
 
         df_grown_old = None
         df_grown_old = LoadBinaryData(binPath_grown)
@@ -1027,7 +1026,6 @@ def get_grown_and_new_from_football_data(countryFolder, Non_Odds_cols, num_booki
                 pass # Make sure the rename_dictionaries are consistent.
                 successful, df_grown, df_new = find_and_grow_with_extra_game_records_pythonic(df_grown_old, df_built)
                 if successful:
-                        print('grown, new: ', df_grown.shape, df_new.shape)
                         print("Successfully found new game records and grew with them", "Extra rows: ", df_new.shape[0])
 
         if df_grown_old is not None:
@@ -1106,6 +1104,25 @@ def assign_seasonal_filenames(countryFolder):
     print('total rows in renamed files: ', total_rows)
     return
 
+def get_teams_by_div(countryTheme_folder_path):
+    binPath_train = os.path.join(countryTheme_folder_path, "df_train" + '.bin')
+    binPath_new = os.path.join(countryTheme_folder_path, "df_new" + '.bin')
+    df_train = LoadBinaryData(binPath_train)
+    df_new = LoadBinaryData(binPath_new)
+
+    div_list = list(df_train['Div']); home_list = list(df_train['HomeTeam']); away_list = list(df_train['AwayTeam'])
+    unique_divs = set(div_list)
+
+    teams_by_div = { div : set([team for team in home_list if div_list[home_list.index(team)]==div]).union(set([team for team in away_list if div_list[away_list.index(team)]==div])) for div in unique_divs }
+    for div1 in unique_divs:
+        for div2 in unique_divs:
+            if div1 != div2:
+                assert teams_by_div[div1].intersection(teams_by_div[div2]) == set()
+    teams_by_div = { div: list(teams) for (div, teams) in teams_by_div.items()}
+
+    return teams_by_div
+
+
 def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeFolder, Non_Odds_cols, num_bookies=5, oddsGroupsToExclude = [], preferedOrder = [], train_mode=True, skip=False):
         binPath_train = os.path.join(countryThemeFolder, "df_train" + '.bin')
         excelPath_train = os.path.join(countryThemeFolder, "df_train" + '.xlsx')
@@ -1115,7 +1132,7 @@ def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeF
         excelPath_white = os.path.join(countryThemeFolder, "df_white" + '.xlsx')
         dictPath = os.path.join(countryThemeFolder, "df_train" + '.json')
 
-        if skip:      # Try to use the existing ones if in inference mode or requested to skip.
+        if skip and train_mode:      # Try to use the existing ones if in inference mode or requested to skip.
                 df_train = LoadBinaryData(binPath_train)
                 df_new = LoadBinaryData(binPath_new)
                 if df_train is not None and df_new is not None:
@@ -1179,7 +1196,6 @@ def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeF
         if len(counts) < num_bookies:   print("!!!!!! Too many bookies requested.")
 
         total_ogs_ordered = [og for (_, og) in counts]
-        print('oGroups count-ordered ', total_ogs_ordered)
 
         # Execute preferedOrder, ignoring count order.
         indices = [i for i in range(len(total_ogs_ordered)) if total_ogs_ordered[i] in preferedOrder]
@@ -1248,7 +1264,6 @@ def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeF
                                 if key == new_name:
                                         renameVector.append(org_name)
                                         break
-                print('Rename Vector: ', key, renameVector)
         
         # df_built.drop_duplicates()
         # Let this be the only place where df is sorted.
@@ -1264,7 +1279,6 @@ def get_train_and_new_from_football_data_v2(gameHistoryFolderPath, countryThemeF
         df_built.insert(loc=0, column='id', value=ids)
 
         df_built = improve_uk_dataframe(df_built, dropNa=False)
-        print('df_built cols: ', df_built.columns)
 
         df_train_old = None
         df_train_old = LoadBinaryData(binPath_train)
@@ -1411,8 +1425,6 @@ def find_and_grow_with_extra_game_records_pythonic(df, df_new):
         print("find and grow raised an exception !!!")
         successful = False
 
-        if successful:
-                print("find and grow :", df_grown.shape[0], df_extra[0])
     return successful, df_grown, df_extra
 
 def assign_seasonal_filenames(countryFolder):
@@ -1435,7 +1447,6 @@ def assign_seasonal_filenames(countryFolder):
             os.rename(filePath, newFilePath)
             total_rows += df.shape[0]
             del df
-    print('total rows in renamed files: ', total_rows)
     return
 
 
@@ -1448,7 +1459,6 @@ def improve_uk_dataframe(df, dropNa=True):
                 ogs = find_1X2_odds_group(df.columns)
                 og_cols = []
                 for og in ogs: og_cols += [og+'H', og+'D', og+'A']
-                print('1', ogs)
                 
                 # norm_params = get_normalization_params(df, og_cols)     # We wish the cols has few nan values.
                 
@@ -2399,7 +2409,7 @@ def create_map_v1(folder, idMap_filename, targetLength, df_sequence, df_base, ye
         # df_built = df_built.sort_values(['Date', 'Div'], ascending=[True, True])
         
         max_days_covered = 0; count = 0
-        for (base_id, div, home, away, base_date) in search_list:      # date: yyyy-mm-dd        , in search_list
+        for (base_id, base_div, home, away, base_date) in search_list:      # date: yyyy-mm-dd        , in search_list
                 if count == testcount: break
                 count += 1
 
@@ -2426,8 +2436,10 @@ def create_map_v1(folder, idMap_filename, targetLength, df_sequence, df_base, ye
                 #????????????????????????????????????? Shall we limit the list to max 5 years ?????????????????????????????????????????????????
                 day_span = year_span * 365
                 sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in total_list if id < base_id and (base_date-dt).days <= day_span]
+                # div_sub_list = [(id, div, home, away, dt) for (id, div, home, away, dt) in sub_list if div == base_div]
+
                 inputCurrent = 1000.0
-                games, report = get_historical_games(base_id, base_date, div, home, away, sub_list, targetLength, inputCurrent, conductance365=0.9)
+                games, report = get_historical_games(base_id, base_date, base_div, home, away, sub_list, targetLength, inputCurrent, conductance365=0.9)
 
                 if len(games) > 0: days_covered = (base_date - date_list[id_list.index(games[-1])]).days
                 else: days_covered = 0
@@ -2556,3 +2568,234 @@ def convert_to_token_with_candidates(tokenizer, teamList, candi_count=3):
     return teams, candidates, success
 
 
+def ensure_excelfile_exists(filePath) :
+    try :
+        if os.path.exists( filePath ) is True :
+            workbook = openpyxl.load_workbook( filePath )
+        else :
+            workbook = openpyxl.Workbook()
+            workbook.save( filePath )
+    except :
+        raise Exception( "Failed ensureing Excel file exists: {}".format(filePath) )
+    return
+
+def find_latest_bookie_dictionary(countryThemeFolder, divs):
+    dictPath = os.path.join(countryThemeFolder, "df_train" + '.json')
+    total_dict = LoadJsonData(dictPath)
+
+    dicts_by_div = { div : [-1, {}] for div in divs }
+
+    for (fileName, bookieDict) in total_dict.items():
+            [div, yearA, _] = fileName.split('-')
+            if dicts_by_div[div][0] < int(yearA):
+                  dicts_by_div[div][0] = int(yearA)
+                  dicts_by_div[div][1] = bookieDict
+
+    dicts_by_div = { div : dict for (div, (maxYearA, dict)) in dicts_by_div.items() }
+
+    first_dict = None
+    for (div, dict) in dicts_by_div.items():
+        if first_dict is None:
+                first_dict = dict
+        else:
+            assert first_dict == dict
+
+    return first_dict
+
+
+def format_inference_input_excel_file(folder_path, filename, sheet, bookie_list):
+    odds_cols = []
+    for bookie in bookie_list:
+        odds_cols += [bookie+'H', bookie+'D', bookie+'A']
+
+    column_list = ['id', 'year', 'month', 'day', 'hour', 'minute', 'Div', 'HomeTeam', 'AwayTeam']
+    input_columns = {col:[] for col in column_list}
+    input_columns = input_columns | {col: pd.Series(dtype='float') for col in odds_cols}
+    df = pd.DataFrame(input_columns)
+
+    filePath = os.path.join(folder_path, filename)
+    ensure_excelfile_exists(filePath)
+
+    excelfile = pd.ExcelFile(filePath)
+    sheetnames = excelfile.sheet_names
+    intSheetNames = [int(name) for name in sheetnames if name.isdecimal()]
+    digital_sheet = str(0) if len(intSheetNames) <= 0 else str(max(intSheetNames) + (1 if sheet.lower() == 'next' else 0))
+    sheetName = (digital_sheet if (sheet.lower() == 'next' or sheet.lower() == 'same') else sheet)
+
+    with pd.ExcelWriter(filePath, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+        df.to_excel(writer, sheet_name=sheetName)
+    return column_list, sheetName
+
+
+def check_for_consistency_input_excel_file(countryTheme_folder_path, file_folder_path, filename, sheet, input_columns, tokenizer, bookie_list, divs):
+    teams_by_div = get_teams_by_div(countryTheme_folder_path)
+
+    filePath = os.path.join(file_folder_path, filename)
+    df = pd.read_excel(filePath, sheet_name=sheet)
+    if 'Unnamed: 0' in list(df.columns): df.drop('Unnamed: 0', axis=1, inplace=True)
+
+    check_report = ""
+    consistent = True
+    # Check for consistency
+    delta = list(set(input_columns) - set(df.columns))
+    if len(delta) > 0: 
+        consistent = False
+        check_report += "Some columns are missing: {}\n".format(",".join(delta))
+    if not (df.shape[0] > 0): 
+        consistent = False
+        check_report += "There are no data rows. \n"
+    if df.isnull().any().any():
+        consistent = False
+        check_report += "There are some NaN values. \n"
+
+    if set(['year', 'month', 'day', 'hour', 'minute']) <= set(df.columns):
+        try:
+            datetime_series = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']], utc=True)
+            now = datetime.datetime.now(pytz.utc)
+            delta_hours = [(dt - now).total_seconds()/3600 for dt in datetime_series]
+            negatives = [id for id in range(len(delta_hours)) if delta_hours[id] < 0]
+            if len(negatives) > 0:
+                consistent = False
+                check_report += "Some datetimes are past: rows = {}\n".format(",".join([str(id) for id in negatives]))
+            aheads = [id for id in range(len(delta_hours)) if delta_hours[id] > 24]
+            if max(delta_hours) > 24:
+                consistent = False
+                check_report += "Some datetimes are not within 24 hours: rows = {}\n".format(",".join([str(id) for id in aheads]))
+        except:
+            consistent = False
+            check_report += "Some datetime columns have invalid data types or value range. \n"
+
+    divs = list(df['Div']); homes = list(df['HomeTeam']); aways = list(df['AwayTeam'])
+    for id in range(len(divs)):
+           if homes[id] not in teams_by_div[divs[id]]:
+                  consistent = False
+                  check_report += "{} doesn't belong to {} teams\n".format(homes[id], divs[id])
+           if aways[id] not in teams_by_div[divs[id]]:
+                  consistent = False
+                  check_report += "{} doesn't belong to {} teams\n".format(aways[id], divs[id])
+
+    lists = [homes, aways]
+    teamList = [val for tup in zip(*lists) for val in tup]
+    teams, candidates, success = convert_to_token_with_candidates(tokenizer, teamList, candi_count=3)
+    if success is False:
+        consistent = False
+        check_report += "Mis-spelled teams and their possible candidates come below: \n"
+        for (spell, candis) in candidates.items():
+            check_report += "\t{} : {}\n".format(spell, candis)
+
+    delta = list(set(df['Div']) - set(divs))
+    if len(delta) > 0:
+        consistent = False
+        check_report += "Some Div values are wrong: {}\n".format(delta)
+
+    odds_cols = []
+    for bookie in bookie_list:
+        odds_cols += [bookie+'H', bookie+'D', bookie+'A']
+
+    for col in odds_cols:
+        odds = np.array(df[col])
+        condition = odds <= 1.0
+        if condition.any():
+            consistent = False
+            check_report += "Some odds are too small: rows {} columns {}\n".format(list(np.where(condition)[0]), col)
+        condition = odds > 60.0
+        if (condition).any():
+            consistent = False
+            check_report += "Some odds are too large: rows {} columns {}\n".format(list(np.where(condition)[0]), col)
+
+    for bookie in bookie_list:
+        cols = [bookie+'H', bookie+'D', bookie+'A']
+        odds = np.array(df[cols])
+        condition = np.sum(1/odds, axis=-1) > 1.2
+        if condition:
+            consistent = False
+            check_report += "Some odds group are too small: odds group {}\n".format(cols)
+        condition = np.sum(1/odds, axis=-1) < 0.85
+        if condition:
+            consistent = False
+            check_report += "Some odds group are too large: odds group {}\n".format(cols)
+
+    return consistent, check_report
+
+
+def build_bbab_dataframe(file_folder_path, filename, sheet, bb_cols, ab_cols, bookie_dict):
+    filePath = os.path.join(file_folder_path, filename)
+    df = pd.read_excel(filePath, sheet_name=sheet)
+
+    datetime_series = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']], utc=True)
+    df.drop(['year', 'month', 'day', 'hour', 'minute'], axis=1, inplace=True)
+    df.insert(3, 'Date', datetime_series.dt.date)
+    df['id'] = range(config['baseGameId'] * 2, config['baseGameId'] * 2 + df.shape[0])
+    
+    dummy = [0 for _ in range(df.shape[0])]
+    loc = 6
+    for col in ab_cols:
+        df.insert(loc, col, dummy)
+        loc += 1
+
+    rename_plan = {}
+    for (k, v) in bookie_dict.items():
+           rename_plan = rename_plan | {k+'H': v+'H', k+'D': v+'D', k+'A': v+'A'}
+    df.rename(columns=rename_plan, inplace=True)
+
+    df = df[bb_cols + ab_cols]
+
+    return df
+
+def get_subfolders(folder):
+    subfolders = []
+    for (root, dirs, files) in os.walk(folder):
+        if root == folder:
+            subfolders = dirs
+            break
+    return subfolders
+
+def remove_subfolders(folder, subfolders):
+    for sb in subfolders:
+        path = os.path.join(folder, sb)
+        shutil.rmtree(path)
+
+def create_output_excel_sheet(history_folder, filename, sheetName, prediction, df_bbab_to_predict, bookie_dict, AB_cols, NUMBER_QUERIES):
+        df_bbab_to_predict.drop(AB_cols, axis=1, inplace=True)
+
+        rename_plan = {}
+        for (k, v) in bookie_dict.items():
+                rename_plan = rename_plan | {v+'H': k+'H', v+'D': k+'D', v+'A': k+'A'}
+        df_bbab_to_predict.rename(columns=rename_plan, inplace=True)
+        print(df_bbab_to_predict)
+
+        def oneHot_to_1X2(oneHot): return '1' if oneHot == [1,0,0] else ('X' if oneHot == [0,1,0] else '2')
+        bookies = list(bookie_dict.keys())
+        for (baseId, oneHots) in prediction.items():
+                symbols = []
+                for id in range(len(bookies)):
+                        start = NUMBER_QUERIES * id
+                        oneHot = oneHots[start: start+NUMBER_QUERIES]
+                        symbols.append(oneHot_to_1X2(oneHot))
+                prediction[baseId] = symbols
+        print(prediction)
+
+        id_list = list(df_bbab_to_predict['id'])
+
+        symbols_by_bookie = {}
+        for id in range(len(bookies)):
+                symbols_by_bookie = symbols_by_bookie | { bookies[id]: [ prediction[baseId][id] for baseId in id_list] }
+        print(symbols_by_bookie)
+
+        for b in bookies:
+                loc = list(df_bbab_to_predict.columns).index(b+'A')
+                df_bbab_to_predict.insert(loc+1, b, symbols_by_bookie[b])
+        print(df_bbab_to_predict)
+
+        cols = []
+        for b in bookies:
+                cols += [b+'H', b+'D', b+'A']
+        df_bbab_to_predict.drop(cols, axis=1, inplace=True)
+
+        filePath = os.path.join(history_folder, filename)
+        sheetName = '_' + sheetName
+
+        with pd.ExcelWriter(filePath, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+                df_bbab_to_predict.to_excel(writer, sheet_name=sheetName)
+
+        return

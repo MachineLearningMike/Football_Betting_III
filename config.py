@@ -34,6 +34,8 @@ config['bookie_profit_percent'] = 5.0
 config['baseDate'] = datetime.datetime(2000, 1, 1)
 config['baseGameId'] = int(1E6) # gameId: 1012345, 1012346, ...
 
+config['bookie_name_dic'] = { 'England': {"B365": "HDA0", "BW": "HDA1", "WH": "HDA2", "PSC": "HDA3", "PS": "HDA4"} }
+
 # config['np_int'] = np.int32
 # config['np_flaot'] = np.float32
 # config['tf_int'] = tf.int32
