@@ -1104,7 +1104,7 @@ def assign_seasonal_filenames(countryFolder):
     print('total rows in renamed files: ', total_rows)
     return
 
-def get_teams_by_div(countryTheme_folder_path):
+def get_teams_by_div_from_total(countryTheme_folder_path):
     binPath_train = os.path.join(countryTheme_folder_path, "df_train" + '.bin')
     binPath_new = os.path.join(countryTheme_folder_path, "df_new" + '.bin')
     df_train = LoadBinaryData(binPath_train)
@@ -1113,7 +1113,7 @@ def get_teams_by_div(countryTheme_folder_path):
     div_list = list(df_train['Div']); home_list = list(df_train['HomeTeam']); away_list = list(df_train['AwayTeam'])
     unique_divs = set(div_list)
 
-    teams_by_div = { div : set([team for team in home_list if div_list[home_list.index(team)]==div]).union(set([team for team in away_list if div_list[away_list.index(team)]==div])) for div in unique_divs }
+    teams_by_div = { div : set([home_list[id] for id in range(len(home_list)) if div_list[id]==div]).union(set([away_list[id] for id in range(len(away_list)) if div_list[id]==div])) for div in unique_divs }
     for div1 in unique_divs:
         for div2 in unique_divs:
             if div1 != div2:
@@ -2366,7 +2366,7 @@ def CREATE_MAP_v1(folder, idMap_filename, targetLength, df_sequence, df_base, ye
 
                         if len(games) < history_len:
                                 candi_games = [id for (id, _, _, _, _) in sub_list if id not in games]
-                                games = games + candi_games[ : history_len - len(games)]
+                                games = games + candi_games[ : history_len - len(games)]        #--------------- ERROR, not latest games.
                                 report += 1     # 200, 311, 320, 420, 330
 
                         assert len(games) == history_len
@@ -2612,16 +2612,19 @@ def CREATE_MAP_v2(folder, idMap_filename, targetLength, df_sequence, df_base, ye
                 return gameGraph, nTotalGames, pairsChanged, currents
         
         #-------------------------------------------------------------------------------------------------------------
+        def get_teams_by_div(df_sequence):
+                div_list = list(df_sequence['Div']); home_list = list(df_sequence['HomeTeam']); away_list = list(df_sequence['AwayTeam'])
+                unique_divs = set(div_list)
+                teams_by_div = {div: set([home_list[i] for i in range(len(home_list)) if div_list[i] == div]).union(set([away_list[i] for i in range(len(away_list)) if div_list[i] == div])) for div in unique_divs}
 
-        div_list = list(df_sequence['Div']); home_list = list(df_sequence['HomeTeam']); away_list = list(df_sequence['AwayTeam'])
-        unique_divs = set(div_list)
-
-        teams_by_div = { div : set([team for team in home_list if div_list[home_list.index(team)]==div]).union(set([team for team in away_list if div_list[away_list.index(team)]==div])) for div in unique_divs }
-        for div1 in unique_divs:
-                for div2 in unique_divs:
-                        if div1 != div2:
-                                assert teams_by_div[div1].intersection(teams_by_div[div2]) == set()
-        teams_by_div = { div: list(teams) for (div, teams) in teams_by_div.items()}
+                teams_by_div = { div : set([team for team in home_list if div_list[home_list.index(team)]==div]).union(set([team for team in away_list if div_list[away_list.index(team)]==div])) for div in unique_divs }
+                for div1 in unique_divs:
+                        for div2 in unique_divs:
+                                if div1 != div2:
+                                        assert teams_by_div[div1].intersection(teams_by_div[div2]) == set()
+                teams_by_div = { div: list(teams) for (div, teams) in teams_by_div.items()}
+                return teams_by_div
+        teams_by_div = get_teams_by_div(df_sequence)
         #--------------------------------------------------------------------------------------------------------------
 
 
