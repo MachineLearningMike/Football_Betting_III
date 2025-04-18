@@ -3120,7 +3120,7 @@ def create_output_excel_sheet(history_folder, filename, sheetName, prediction, d
 
         return
 
-def find_first_start_and_end_date(ds):
+def find_start_and_end_dates(ds):
     baseDateStart = baseDateEnd = None
     for z in ds:
         _, _, _, _, _, baseDateDetails, _ = z
